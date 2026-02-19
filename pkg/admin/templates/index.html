@@ -45,7 +45,16 @@
                         <td><input type="checkbox" name="ids" value="{{index . "ID"}}" class="item-checkbox"></td>
                         {{$item := .}}
                         {{range $.Fields}}
-                        <td>{{index $item .Name}}</td>
+                        <td>
+                            {{$val := index $item .Name}}
+                            {{if eq .Type "image"}}
+                                {{if $val}}<img src="{{$val}}" style="height: 40px; width: 40px; object-fit: cover; border-radius: 0.25rem;">{{else}}-{{end}}
+                            {{else if eq .Type "file"}}
+                                {{if $val}}<a href="{{$val}}" target="_blank">File</a>{{else}}-{{end}}
+                            {{else}}
+                                {{index $item .Name}}
+                            {{end}}
+                        </td>
                         {{end}}
                         <td style="text-align: right;">
                             <a href="/admin/{{$.CurrentResource.Name}}/show?id={{index $item "ID"}}" style="color: var(--primary); text-decoration: none; margin-left: 1rem; font-size: 0.8125rem;">View</a>
@@ -57,7 +66,6 @@
             </table>
         </form>
 
-        <!-- Pagination & Export -->
         <div class="pagination">
             <div class="pagination-info">
                 Download: <a href="/admin/{{.CurrentResource.Name}}/export" style="color: var(--primary); font-weight: 600;">CSV</a>
@@ -75,14 +83,25 @@
         <h4 style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em;">Filters</h4>
         <form action="/admin/{{.CurrentResource.Name}}" method="GET">
             <input type="hidden" name="scope" value="{{.CurrentScope}}">
-            {{range .Fields}}
-            <div style="margin-bottom: 1rem;">
+            {{range .CurrentResource.Fields}}
+            <div style="margin-bottom: 1.5rem;">
                 <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">{{.Label}}</label>
-                <input type="text" name="q_{{.Name}}" value="{{index $.Filters .Name}}" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; font-size: 0.75rem;">
+                
+                {{if eq .Type "number"}}
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="number" name="min_{{.Name}}" value="{{index $.Filters (printf "min_%s" .Name)}}" placeholder="Min"
+                               style="width: 50%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; font-size: 0.75rem;">
+                        <input type="number" name="max_{{.Name}}" value="{{index $.Filters (printf "max_%s" .Name)}}" placeholder="Max"
+                               style="width: 50%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; font-size: 0.75rem;">
+                    </div>
+                {{else}}
+                    <input type="text" name="q_{{.Name}}" value="{{index $.Filters (printf "q_%s" .Name)}}" placeholder="Contains..."
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; font-size: 0.75rem;">
+                {{end}}
             </div>
             {{end}}
             <button type="submit" class="btn btn-primary" style="width: 100%; font-size: 0.75rem;">Apply Filters</button>
-            <a href="/admin/{{.CurrentResource.Name}}?scope={{.CurrentScope}}" style="display: block; text-align: center; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); text-decoration: none;">Clear</a>
+            <a href="/admin/{{.CurrentResource.Name}}" style="display: block; text-align: center; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); text-decoration: none;">Clear</a>
         </form>
     </div>
 </div>

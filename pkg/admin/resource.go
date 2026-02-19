@@ -28,7 +28,6 @@ type Scope struct {
 	Handler ScopeFunc
 }
 
-// Association represents a relationship between two models.
 type Association struct {
 	Type         string // HasMany, BelongsTo
 	Name         string // The field name in the struct
@@ -55,11 +54,13 @@ type Resource struct {
 }
 
 type Field struct {
-	Name     string
-	Label    string
-	Type     string // text, select, number
-	Options  []string
-	Readonly bool
+	Name           string
+	Label          string
+	Type           string // text, select, number
+	Options        []string
+	Readonly       bool
+	Searchable     bool   // Manual override for searchable select
+	SearchResource string // Resource to search against
 }
 
 func NewResource(model interface{}) *Resource {
@@ -99,7 +100,6 @@ func (r *Resource) AddScope(name, label string, handler ScopeFunc) *Resource {
 	return r
 }
 
-// HasMany adds a relationship where this resource has many of another.
 func (r *Resource) HasMany(name, label, targetResource, foreignKey string) *Resource {
 	r.Associations = append(r.Associations, Association{
 		Type: "HasMany", Name: name, Label: label, ResourceName: targetResource, ForeignKey: foreignKey,
@@ -107,11 +107,22 @@ func (r *Resource) HasMany(name, label, targetResource, foreignKey string) *Reso
 	return r
 }
 
-// BelongsTo adds a relationship where this resource belongs to another.
 func (r *Resource) BelongsTo(name, label, targetResource, foreignKey string) *Resource {
 	r.Associations = append(r.Associations, Association{
 		Type: "BelongsTo", Name: name, Label: label, ResourceName: targetResource, ForeignKey: foreignKey,
 	})
+	return r
+}
+
+// SetSearchable forces a field to use the Select2-style searchable input.
+func (r *Resource) SetSearchable(fieldName string, targetResource string) *Resource {
+	for i, f := range r.Fields {
+		if f.Name == fieldName {
+			r.Fields[i].Searchable = true
+			r.Fields[i].SearchResource = targetResource
+			break
+		}
+	}
 	return r
 }
 

@@ -5,13 +5,19 @@
 {{end}}
 
 {{define "content"}}
-<form action="/admin/{{.CurrentResource.Name}}/save" method="POST" style="padding: 2rem;">
+<style>
+    .search-results { position: absolute; background: white; border: 1px solid var(--border); border-radius: 0.375rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); width: 100%; max-height: 200px; overflow-y: auto; z-index: 50; display: none; }
+    .search-item { padding: 0.75rem; cursor: pointer; font-size: 0.875rem; }
+    .search-item:hover { background: #f1f5f9; }
+</style>
+
+<form action="/admin/{{.CurrentResource.Name}}/save" method="POST" enctype="multipart/form-data" style="padding: 2rem;">
     {{if .Item}}
     <input type="hidden" name="ID" value="{{index .Item "ID"}}">
     {{end}}
     
     {{range .Fields}}
-    <div style="margin-bottom: 1.5rem;">
+    <div style="margin-bottom: 1.5rem; position: relative;">
         <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-muted);">{{.Label}}</label>
         
         {{$fieldName := .Name}}
@@ -21,34 +27,74 @@
             <div style="padding: 0.75rem; background: #f1f5f9; border-radius: 0.375rem; border: 1px solid var(--border);">
                 {{if $.Item}}{{index $.Item .Name}}{{else}}Auto-generated{{end}}
             </div>
-        {{else if $assoc}}
-            <!-- BelongsTo Dropdown -->
-            <select name="{{.Name}}" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;">
-                <option value="0">None</option>
-                {{$currentVal := 0}}{{if $.Item}}{{$currentVal = index $.Item .Name}}{{end}}
-                {{range $assoc.Options}}
-                <option value="{{index . "ID"}}" {{if eq (index . "ID") $currentVal}}selected{{end}}>
-                    {{if index . "Name"}}{{index . "Name"}}{{else if index . "Email"}}{{index . "Email"}}{{else}}ID: {{index . "ID"}}{{end}}
-                </option>
+        {{else if or $assoc .Searchable}}
+            {{if and $assoc $assoc.Options}}
+                <select name="{{.Name}}" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;">
+                    <option value="0">None</option>
+                    {{$currentVal := 0}}{{if $.Item}}{{$currentVal = index $.Item .Name}}{{end}}
+                    {{range $assoc.Options}}
+                    <option value="{{index . "ID"}}" {{if eq (index . "ID") $currentVal}}selected{{end}}>
+                        {{if index . "Name"}}{{index . "Name"}}{{else if index . "Email"}}{{index . "Email"}}{{else}}ID: {{index . "ID"}}{{end}}
+                    </option>
+                    {{end}}
+                </select>
+            {{else}}
+                {{$targetResName := ""}}{{if $assoc}}{{$targetResName = $assoc.Resource.Name}}{{else}}{{$targetResName = .SearchResource}}{{end}}
+                <input type="hidden" name="{{.Name}}" id="hidden-{{.Name}}" value="{{if $.Item}}{{index $.Item .Name}}{{else}}0{{end}}">
+                <input type="text" id="search-{{.Name}}" placeholder="Type to search {{$targetResName}}..."
+                       style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;" autocomplete="off">
+                <div id="results-{{.Name}}" class="search-results"></div>
+                <script>
+                    (function() {
+                        const input = document.getElementById('search-{{.Name}}');
+                        const hidden = document.getElementById('hidden-{{.Name}}');
+                        const results = document.getElementById('results-{{.Name}}');
+                        let timeout = null;
+                        input.addEventListener('input', () => {
+                            clearTimeout(timeout);
+                            if (input.value.length < 2) { results.style.display = 'none'; return; }
+                            timeout = setTimeout(() => {
+                                fetch(`/admin/{{$targetResName}}/search?q=${encodeURIComponent(input.value)}`)
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        results.innerHTML = '';
+                                        if (data.length === 0) { results.style.display = 'none'; return; }
+                                        data.forEach(item => {
+                                            const div = document.createElement('div');
+                                            div.className = 'search-item'; div.textContent = item.text;
+                                            div.onclick = () => { input.value = item.text; hidden.value = item.id; results.style.display = 'none'; };
+                                            results.appendChild(div);
+                                        });
+                                        results.style.display = 'block';
+                                    });
+                            }, 300);
+                        });
+                        document.addEventListener('click', (e) => { if (e.target !== input) results.style.display = 'none'; });
+                    })();
+                </script>
+            {{end}}
+        {{else if or (eq .Type "image") (eq .Type "file")}}
+            {{if $.Item}}
+                {{$val := index $.Item .Name}}
+                {{if $val}}
+                    <div style="margin-bottom: 0.5rem;">
+                        {{if eq .Type "image"}}<img src="{{$val}}" style="max-height: 100px; border-radius: 0.25rem;">{{else}}<a href="{{$val}}" target="_blank">View Current File</a>{{end}}
+                    </div>
                 {{end}}
-            </select>
+            {{end}}
+            <input type="file" name="{{.Name}}" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;">
         {{else if eq .Type "select"}}
             <select name="{{.Name}}" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;">
                 {{$currentVal := ""}}{{if $.Item}}{{$currentVal = index $.Item .Name}}{{end}}
-                {{range .Options}}
-                <option value="{{.}}" {{if eq . $currentVal}}selected{{end}}>{{.}}</option>
-                {{end}}
+                {{range .Options}}<option value="{{.}}" {{if eq . $currentVal}}selected{{end}}>{{.}}</option>{{end}}
             </select>
         {{else}}
-            <input type="text" name="{{.Name}}" value="{{if $.Item}}{{index $.Item .Name}}{{end}}" 
+            <input type="{{if eq .Type "number"}}number{{else}}text{{end}}" name="{{.Name}}" value="{{if $.Item}}{{index $.Item .Name}}{{end}}" 
                    style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.375rem; font-size: 0.875rem;">
         {{end}}
     </div>
     {{end}}
-    
-    <div style="margin-top: 2rem;">
-        <button type="submit" class="btn btn-primary">Save {{.CurrentResource.Name}}</button>
-    </div>
+    <div style="margin-top: 2rem;"><button type="submit" class="btn btn-primary">Save {{.CurrentResource.Name}}</button></div>
 </form>
 {{end}}
 {{template "layout" .}}

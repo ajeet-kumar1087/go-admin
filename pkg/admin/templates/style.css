@@ -50,6 +50,10 @@ body {
     color: white;
 }
 
+.nav-item.nested {
+    padding-left: 2rem;
+}
+
 /* Main Content */
 .main {
     flex-grow: 1;

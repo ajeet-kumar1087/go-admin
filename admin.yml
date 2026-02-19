@@ -2,3 +2,4 @@ site_title: "My Custom Shop"
 default_per_page: 5
 theme_color: "#ef4444"
 session_ttl_hours: 48
+search_threshold: 10

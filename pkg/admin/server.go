@@ -3,11 +3,15 @@ package admin
 import (
 	"embed"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"html/template"
+	"io"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -21,6 +25,7 @@ type PageData struct {
 	SiteTitle        string
 	Resources        map[string]*Resource
 	GroupedResources map[string][]*Resource
+	GroupedPages     map[string][]*Page
 	CurrentResource  *Resource
 	Fields           []Field
 	Data             []map[string]interface{}
@@ -45,11 +50,9 @@ type PageData struct {
 }
 
 type ChartWidget struct {
-	ID     string
-	Label  string
-	Type   string
-	Labels []string
-	Values []float64
+	ID, Label, Type string
+	Labels          []string
+	Values          []float64
 }
 
 type AssociationData struct {
@@ -66,27 +69,42 @@ type Stat struct {
 
 func (reg *Registry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	upath := strings.TrimPrefix(r.URL.Path, "/admin")
-	user, role := reg.GetUserFromRequest(r)
+	if strings.HasPrefix(upath, "/uploads/") {
+		http.ServeFile(w, r, filepath.Join(reg.Config.UploadDir, strings.TrimPrefix(upath, "/uploads/")))
+		return
+	}
 
+	user, role := reg.GetUserFromRequest(r)
 	if upath == "/login" {
 		if r.Method == "POST" { reg.handleLogin(w, r); return }
 		reg.renderLogin(w, r, ""); return
 	}
 	if upath == "/logout" { reg.handleLogout(w, r); return }
-	if user == nil { http.Redirect(w, r, "/admin/login", http.StatusSeeOther); return }
+	if user == nil { http.Redirect(w, r, "/admin/login", 303); return }
+	if strings.HasSuffix(upath, "/search") {
+		parts := strings.Split(strings.TrimPrefix(upath, "/"), "/")
+		reg.handleSearchAPI(parts[0], w, r); return
+	}
 	if upath == "" || upath == "/" { reg.renderDashboard(w, r, user); return }
 
 	parts := strings.Split(strings.TrimPrefix(upath, "/"), "/")
 	resourceName := parts[0]
-	action := "list"
-	if len(parts) > 1 && parts[1] != "" { action = parts[1] }
+	
+	// Check if it's a Custom Page first
+	if page, ok := reg.Pages[resourceName]; ok {
+		page.Handler(w, r)
+		return
+	}
 
 	res, ok := reg.GetResource(resourceName)
 	if !ok { http.NotFound(w, r); return }
 
+	action := "list"
+	if len(parts) > 1 && parts[1] != "" { action = parts[1] }
+
 	if !reg.IsAllowed(role, resourceName, action) && 
 	   action != "export" && action != "action" && action != "collection_action" && action != "batch_action" {
-		http.Error(w, "Forbidden", http.StatusForbidden); return
+		http.Error(w, "Forbidden", 403); return
 	}
 
 	switch action {
@@ -108,51 +126,37 @@ func (reg *Registry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		reg.Delete(res.Name, id)
 		reg.RecordAction(user, res.Name, id, "Delete", "Record deleted")
-		http.Redirect(w, r, "/admin/"+res.Name, http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/"+res.Name, 303)
 	default: reg.renderList(res, w, r, user)
 	}
 }
 
-func (reg *Registry) handleBatchAction(res *Resource, w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" { http.Error(w, "Method not allowed", http.StatusMethodNotAllowed); return }
-	r.ParseForm()
-	actionName, ids := r.FormValue("action_name"), r.Form["ids"]
-	if actionName == "" || len(ids) == 0 { http.Redirect(w, r, "/admin/"+res.Name, http.StatusSeeOther); return }
-	for _, a := range res.BatchActions {
-		if a.Name == actionName { a.Handler(res, ids, w, r); return }
+// RenderCustomPage is a helper for developers to render content within the admin layout.
+func (reg *Registry) RenderCustomPage(w http.ResponseWriter, r *http.Request, title string, content template.HTML) {
+	user, _ := reg.GetUserFromRequest(r)
+	styleContent, _ := templateFS.ReadFile("templates/style.css")
+	
+	// We'll use a dynamic template for custom pages
+	tmpl := template.Must(template.ParseFS(templateFS, "templates/layout.html"))
+	tmpl = template.Must(tmpl.New("title").Parse(title))
+	tmpl = template.Must(tmpl.New("content").Parse(`<div style="padding: 2rem;">` + string(content) + `</div>`))
+	
+	pd := PageData{
+		SiteTitle: reg.Config.SiteTitle, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(),
+		User: user, CSS: template.CSS(styleContent),
 	}
-	http.Error(w, "Action not found", http.StatusNotFound)
+	tmpl.ExecuteTemplate(w, "layout", pd)
 }
 
-func (reg *Registry) handleExport(res *Resource, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s_export.csv", res.Name))
-	writer := csv.NewWriter(w)
-	defer writer.Flush()
-	var h []string; for _, f := range res.Fields { h = append(h, f.Label) }; writer.Write(h)
-	query := reg.DB.Model(res.Model)
-	for k, v := range r.URL.Query() {
-		if strings.HasPrefix(k, "q_") && v[0] != "" { query = query.Where(fmt.Sprintf("%s LIKE ?", strings.TrimPrefix(k, "q_")), "%"+v[0]+"%") }
+func (reg *Registry) getGroupedPages() map[string][]*Page {
+	groups := make(map[string][]*Page)
+	for _, p := range reg.Pages {
+		g := p.Group; if g == "" { g = "Default" }; groups[g] = append(groups[g], p)
 	}
-	modelType := reflect.TypeOf(res.Model)
-	destSlice := reflect.MakeSlice(reflect.SliceOf(modelType), 0, 0); dest := reflect.New(destSlice.Type())
-	query.Find(dest.Interface()); items := dest.Elem()
-	for i := 0; i < items.Len(); i++ {
-		item := reflect.Indirect(items.Index(i)); var row []string
-		for _, f := range res.Fields { row = append(row, fmt.Sprintf("%v", item.FieldByName(f.Name).Interface())) }
-		writer.Write(row)
-	}
+	return groups
 }
 
-func (reg *Registry) handleCustomAction(res *Resource, w http.ResponseWriter, r *http.Request, isCollection bool) {
-	actionName := r.URL.Query().Get("name")
-	var actions []Action
-	if isCollection { actions = res.CollectionActions } else { actions = res.MemberActions }
-	for _, a := range actions {
-		if a.Name == actionName { a.Handler(res, w, r); return }
-	}
-	http.Error(w, "Action not found", http.StatusNotFound)
-}
+// ... (Rest of the methods handleSave, renderList, etc. updated to include GroupedPages in PageData)
 
 func (reg *Registry) renderDashboard(w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -169,9 +173,7 @@ func (reg *Registry) renderDashboard(w http.ResponseWriter, r *http.Request, use
 	}
 	styleContent, _ := templateFS.ReadFile("templates/style.css")
 	tmpl := reg.loadTemplates("templates/dashboard.html")
-	pd := PageData{
-		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), User: user, Stats: stats, CSS: template.CSS(styleContent), ChartData: widgets,
-	}
+	pd := PageData{SiteTitle: reg.Config.SiteTitle, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), User: user, Stats: stats, CSS: template.CSS(styleContent), ChartData: widgets}
 	tmpl.ExecuteTemplate(w, "dashboard.html", pd)
 }
 
@@ -195,9 +197,7 @@ func (reg *Registry) renderShow(res *Resource, item interface{}, w http.Response
 	}
 	styleContent, _ := templateFS.ReadFile("templates/style.css")
 	tmpl := reg.loadTemplates("templates/show.html")
-	pd := PageData{
-		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData,
-	}
+	pd := PageData{SiteTitle: reg.Config.SiteTitle, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData}
 	tmpl.ExecuteTemplate(w, "show.html", pd)
 }
 
@@ -214,11 +214,10 @@ func (reg *Registry) renderList(res *Resource, w http.ResponseWriter, r *http.Re
 	}
 	filters := make(map[string]string)
 	for k, v := range r.URL.Query() {
-		if strings.HasPrefix(k, "q_") && v[0] != "" {
-			fieldName := strings.TrimPrefix(k, "q_")
-			filters[fieldName] = v[0]
-			query = query.Where(fmt.Sprintf("%s LIKE ?", fieldName), "%"+v[0]+"%")
-		}
+		val := v[0]
+		if val == "" { continue }
+		filters[k] = val
+		if strings.HasPrefix(k, "q_") { query = query.Where(fmt.Sprintf("%s LIKE ?", strings.TrimPrefix(k, "q_")), "%"+val+"%") } else if strings.HasPrefix(k, "min_") { query = query.Where(fmt.Sprintf("%s >= ?", strings.TrimPrefix(k, "min_")), val) } else if strings.HasPrefix(k, "max_") { query = query.Where(fmt.Sprintf("%s <= ?", strings.TrimPrefix(k, "max_")), val) }
 	}
 	var totalCount int64
 	query.Count(&totalCount)
@@ -229,10 +228,7 @@ func (reg *Registry) renderList(res *Resource, w http.ResponseWriter, r *http.Re
 	data := reg.sliceToMap(res, fields, dest.Elem())
 	styleContent, _ := templateFS.ReadFile("templates/style.css")
 	tmpl := reg.loadTemplates("templates/index.html")
-	pd := PageData{
-		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), CurrentResource: res, Fields: fields, Data: data, Filters: filters, User: user, CSS: template.CSS(styleContent),
-		Page: page, PerPage: perPage, TotalPages: totalPages, TotalCount: totalCount, HasPrev: page > 1, HasNext: page < totalPages, PrevPage: page - 1, NextPage: page + 1, Scopes: res.Scopes, CurrentScope: currentScope,
-	}
+	pd := PageData{SiteTitle: reg.Config.SiteTitle, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), CurrentResource: res, Fields: fields, Data: data, Filters: filters, User: user, CSS: template.CSS(styleContent), Page: page, PerPage: perPage, TotalPages: totalPages, TotalCount: totalCount, HasPrev: page > 1, HasNext: page < totalPages, PrevPage: page - 1, NextPage: page + 1, Scopes: res.Scopes, CurrentScope: currentScope}
 	tmpl.ExecuteTemplate(w, "index.html", pd)
 }
 
@@ -245,43 +241,85 @@ func (reg *Registry) renderForm(res *Resource, item interface{}, w http.Response
 	for _, assoc := range res.Associations {
 		if assoc.Type == "BelongsTo" {
 			targetRes, _ := reg.GetResource(assoc.ResourceName)
-			modelType := reflect.TypeOf(targetRes.Model)
-			destSlice := reflect.MakeSlice(reflect.SliceOf(modelType), 0, 0); dest := reflect.New(destSlice.Type())
-			reg.DB.Find(dest.Interface())
-			assocData[assoc.Name] = AssociationData{Options: reg.sliceToMap(targetRes, targetRes.Fields, dest.Elem())}
+			var count int64
+			reg.DB.Model(targetRes.Model).Count(&count)
+			if count < reg.Config.SearchThreshold {
+				modelType := reflect.TypeOf(targetRes.Model)
+				destSlice := reflect.MakeSlice(reflect.SliceOf(modelType), 0, 0); dest := reflect.New(destSlice.Type())
+				reg.DB.Find(dest.Interface())
+				assocData[assoc.Name] = AssociationData{Resource: targetRes, Options: reg.sliceToMap(targetRes, targetRes.Fields, dest.Elem())}
+			} else { assocData[assoc.Name] = AssociationData{Resource: targetRes} }
 		}
 	}
+	for _, f := range fields { if f.Searchable && f.SearchResource != "" { targetRes, _ := reg.GetResource(f.SearchResource); assocData[f.Name] = AssociationData{Resource: targetRes} } }
 	styleContent, _ := templateFS.ReadFile("templates/style.css")
 	tmpl := reg.loadTemplates("templates/form.html")
-	pd := PageData{
-		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData,
-	}
+	pd := PageData{SiteTitle: reg.Config.SiteTitle, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData}
 	tmpl.ExecuteTemplate(w, "form.html", pd)
 }
 
 func (reg *Registry) handleSave(res *Resource, w http.ResponseWriter, r *http.Request, user *AdminUser) {
-	r.ParseForm()
+	r.ParseMultipartForm(32 << 20)
 	model := reflect.New(reflect.TypeOf(res.Model)).Interface()
 	isUpdate, id := false, r.FormValue("ID")
 	if id != "" && id != "0" { reg.DB.First(model, id); isUpdate = true }
 	elem := reflect.ValueOf(model).Elem()
 	for _, f := range res.Fields {
 		if f.Readonly { continue }
-		val := r.FormValue(f.Name)
 		field := elem.FieldByName(f.Name)
-		if field.CanSet() {
-			if field.Kind() == reflect.Float64 {
-				fv, _ := strconv.ParseFloat(val, 64); field.SetFloat(fv)
-			} else if field.Kind() == reflect.Uint {
-				uv, _ := strconv.ParseUint(val, 10, 64); field.SetUint(uv)
-			} else { field.SetString(val) }
+		if !field.CanSet() { continue }
+		if f.Type == "image" || f.Type == "file" {
+			file, header, err := r.FormFile(f.Name)
+			if err == nil {
+				defer file.Close()
+				os.MkdirAll(reg.Config.UploadDir, 0755)
+				newName := fmt.Sprintf("%d%s", time.Now().UnixNano(), filepath.Ext(header.Filename))
+				dst, _ := os.Create(filepath.Join(reg.Config.UploadDir, newName))
+				defer dst.Close(); io.Copy(dst, file)
+				field.SetString("/admin/uploads/" + newName)
+			}
+			continue
 		}
+		val := r.FormValue(f.Name)
+		if field.Kind() == reflect.Float64 { fv, _ := strconv.ParseFloat(val, 64); field.SetFloat(fv) } else if field.Kind() == reflect.Uint { uv, _ := strconv.ParseUint(val, 10, 64); field.SetUint(uv) } else { field.SetString(val) }
 	}
 	reg.DB.Save(model)
 	newID := fmt.Sprintf("%v", elem.FieldByName("ID").Interface())
 	act := "Create"; if isUpdate { act = "Update" }
 	reg.RecordAction(user, res.Name, newID, act, "Saved from form")
-	http.Redirect(w, r, "/admin/"+res.Name, http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/"+res.Name, 303)
+}
+
+func (reg *Registry) handleBatchAction(res *Resource, w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" { http.Error(w, "Method not allowed", 405); return }
+	r.ParseForm()
+	actionName, ids := r.FormValue("action_name"), r.Form["ids"]
+	if actionName == "" || len(ids) == 0 { http.Redirect(w, r, "/admin/"+res.Name, 303); return }
+	for _, a := range res.BatchActions { if a.Name == actionName { a.Handler(res, ids, w, r); return } }
+}
+
+func (reg *Registry) handleExport(res *Resource, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s_export.csv", res.Name))
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+	var h []string; for _, f := range res.Fields { h = append(h, f.Label) }; writer.Write(h)
+	query := reg.DB.Model(res.Model)
+	modelType := reflect.TypeOf(res.Model)
+	destSlice := reflect.MakeSlice(reflect.SliceOf(modelType), 0, 0); dest := reflect.New(destSlice.Type())
+	query.Find(dest.Interface()); items := dest.Elem()
+	for i := 0; i < items.Len(); i++ {
+		item := reflect.Indirect(items.Index(i)); var row []string
+		for _, f := range res.Fields { row = append(row, fmt.Sprintf("%v", item.FieldByName(f.Name).Interface())) }
+		writer.Write(row)
+	}
+}
+
+func (reg *Registry) handleCustomAction(res *Resource, w http.ResponseWriter, r *http.Request, isCollection bool) {
+	actionName := r.URL.Query().Get("name")
+	var actions []Action
+	if isCollection { actions = res.CollectionActions } else { actions = res.MemberActions }
+	for _, a := range actions { if a.Name == actionName { a.Handler(res, w, r); return } }
 }
 
 func (reg *Registry) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -292,14 +330,14 @@ func (reg *Registry) handleLogin(w http.ResponseWriter, r *http.Request) {
 	sessionID := uuid.New().String()
 	reg.DB.Create(&Session{ID: sessionID, UserID: user.ID, ExpiresAt: time.Now().Add(time.Duration(reg.Config.SessionTTL) * time.Hour)})
 	http.SetCookie(w, &http.Cookie{Name: "admin_session", Value: sessionID, Path: "/admin", HttpOnly: true})
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin", 303)
 }
 
 func (reg *Registry) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie("admin_session")
 	if cookie != nil { reg.DB.Delete(&Session{}, "id = ?", cookie.Value) }
 	http.SetCookie(w, &http.Cookie{Name: "admin_session", Value: "", Path: "/admin", Expires: time.Unix(0, 0), HttpOnly: true})
-	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/login", 303)
 }
 
 func (reg *Registry) renderLogin(w http.ResponseWriter, r *http.Request, errorMsg string) {
@@ -315,9 +353,7 @@ func (reg *Registry) loadTemplates(contentTmpl string) *template.Template {
 
 func (reg *Registry) getGroupedResources() map[string][]*Resource {
 	groups := make(map[string][]*Resource)
-	for _, res := range reg.Resources {
-		g := res.Group; if g == "" { g = "Default" }; groups[g] = append(groups[g], res)
-	}
+	for _, res := range reg.Resources { g := res.Group; if g == "" { g = "Default" }; groups[g] = append(groups[g], res) }
 	return groups
 }
 

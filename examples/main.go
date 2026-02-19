@@ -24,6 +24,7 @@ type Product struct {
 	ID    uint   `gorm:"primaryKey"`
 	Name  string
 	Price float64
+	Image string
 }
 
 type ProductInfo struct {
@@ -117,6 +118,9 @@ func main() {
 		RegisterField("ID", "ID", true).
 		RegisterField("Name", "Product Name", false).
 		RegisterField("Price", "Price", false).
+		RegisterField("Image", "Product Image", false).
+		SetFieldType("Price", "number").
+		SetFieldType("Image", "image").
 		HasMany("ProductInfo", "Technical Specifications", "ProductInfo", "ProductID").
 		AddCollectionAction("discount", "Apply 10% Bulk Discount", func(res *admin.Resource, w http.ResponseWriter, r *http.Request) {
 			adm.DB.Model(&Product{}).Where("price > ?", 0).Update("price", gorm.Expr("price * 0.9"))
@@ -140,7 +144,8 @@ func main() {
 		RegisterField("ProductID", "Product", false).
 		RegisterField("Description", "Description", false).
 		RegisterField("Manufacturer", "Manufacturer", false).
-		BelongsTo("ProductID", "Parent Product", "Product", "ID")
+		BelongsTo("ProductID", "Parent Product", "Product", "ID").
+		SetSearchable("ProductID", "Product")
 	addActivityAction(piRes)
 
 	// 4. Register Dashboard Charts
@@ -174,7 +179,22 @@ func main() {
 		return labels, values
 	})
 
-	// Seed Data
+	// 5. Register Custom Pages
+	adm.AddPage("SystemStatus", "Administration", func(w http.ResponseWriter, r *http.Request) {
+		content := template.HTML(`
+			<div style="background: white; border-radius: 0.5rem; overflow: hidden;">
+				<table style="width: 100%; border-collapse: collapse;">
+					<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 1rem; font-weight: 600;">Server Uptime</td><td style="padding: 1rem;">12 days, 4 hours</td></tr>
+					<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 1rem; font-weight: 600;">Database Status</td><td style="padding: 1rem; color: #10b981;">Connected (v15.2)</td></tr>
+					<tr style="border-bottom: 1px solid #e2e8f0;"><td style="padding: 1rem; font-weight: 600;">Storage Used</td><td style="padding: 1rem;">45.2 GB / 100 GB</td></tr>
+					<tr><td style="padding: 1rem; font-weight: 600;">Go Version</td><td style="padding: 1rem;">1.25.7</td></tr>
+				</table>
+			</div>
+		`)
+		adm.RenderCustomPage(w, r, "System Status Overview", content)
+	})
+
+	// 6. Seed Data
 	var adminCount int64
 	db.Model(&admin.AdminUser{}).Count(&adminCount)
 	if adminCount == 0 {
