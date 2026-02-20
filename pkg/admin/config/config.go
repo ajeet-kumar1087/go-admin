@@ -1,4 +1,4 @@
-package admin
+package config
 
 import (
 	"gopkg.in/yaml.v3"
