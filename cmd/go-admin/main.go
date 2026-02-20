@@ -16,8 +16,7 @@ Usage:
 const mainTemplate = `package main
 
 import (
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/config"
+	"github.com/ajeet-kumar1087/go-admin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"log"
@@ -30,7 +29,7 @@ func main() {
 	adm := admin.NewRegistry(db)
 	
 	// Load Custom Config
-	conf, _ := config.LoadConfig("admin.yml")
+	conf, _ := admin.LoadConfig("admin.yml")
 	adm.SetConfig(conf)
 
 	log.Println("🚀 Admin panel starting on http://localhost:8080/admin")
@@ -66,9 +65,7 @@ func handleInit() {
 	os.WriteFile("main.go", []byte(mainTemplate), 0644)
 	
 	fmt.Println("Creating admin.yml...")
-	os.WriteFile("admin.yml", []byte("site_title: "My Admin"
-default_per_page: 10
-"), 0644)
+	os.WriteFile("admin.yml", []byte("site_title: \"My Admin\"\ndefault_per_page: 10\n"), 0644)
 	
 	fmt.Println("✅ Done! Run 'go mod init' and 'go mod tidy' to start.")
 }
