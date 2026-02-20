@@ -4,8 +4,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/resource"
 	"html/template"
 	"io"
 	"math"
@@ -18,7 +16,7 @@ import (
 	"time"
 )
 
-func (reg *Registry) renderList(res *resource.Resource, w http.ResponseWriter, r *http.Request, user *models.AdminUser) {
+func (reg *Registry) renderList(res *Resource, w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fields := res.GetFieldsFor("index")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page")); if page < 1 { page = 1 }
@@ -30,14 +28,13 @@ func (reg *Registry) renderList(res *resource.Resource, w http.ResponseWriter, r
 		for _, s := range res.Scopes { if s.Name == currentScope { query = s.Handler(query); break } }
 	}
 
-	// Sorting
 	sortField := r.URL.Query().Get("sort")
 	sortOrder := r.URL.Query().Get("order")
 	if sortField != "" {
 		if sortOrder != "desc" { sortOrder = "asc" }
 		query = query.Order(fmt.Sprintf("%s %s", sortField, sortOrder))
 	} else {
-		query = query.Order("id desc") // Default sort
+		query = query.Order("id desc")
 	}
 
 	filters := make(map[string]string)
@@ -57,13 +54,12 @@ func (reg *Registry) renderList(res *resource.Resource, w http.ResponseWriter, r
 		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), 
 		CurrentResource: res, Fields: fields, Data: data, Filters: filters, User: user, CSS: template.CSS(styleContent),
 		Page: page, PerPage: perPage, TotalPages: totalPages, TotalCount: totalCount, HasPrev: page > 1, HasNext: page < totalPages, PrevPage: page - 1, NextPage: page + 1, Scopes: res.Scopes, CurrentScope: currentScope,
-		Flash: reg.getFlash(w, r),
-		SortField: sortField, SortOrder: sortOrder,
+		Flash: reg.getFlash(w, r), SortField: sortField, SortOrder: sortOrder,
 	}
 	tmpl.ExecuteTemplate(w, "index.html", pd)
 }
 
-func (reg *Registry) renderShow(res *resource.Resource, item interface{}, w http.ResponseWriter, r *http.Request, user *models.AdminUser) {
+func (reg *Registry) renderShow(res *Resource, item interface{}, w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fields := res.GetFieldsFor("show")
 	var itemMap map[string]interface{}
@@ -82,23 +78,16 @@ func (reg *Registry) renderShow(res *resource.Resource, item interface{}, w http
 				assocData[assoc.Name] = AssociationData{Resource: targetRes, Fields: targetFields, Items: reg.sliceToMap(targetRes, targetFields, dest.Elem())}
 			}
 		}
-		// Render sidebars
-		for _, sb := range res.Sidebars {
-			renderedSidebars[sb.Label] = sb.Handler(res, item)
-		}
+		for _, sb := range res.Sidebars { renderedSidebars[sb.Label] = sb.Handler(res, item) }
 	}
 
 	styleContent, _ := templateFS.ReadFile("templates/style.css")
 	tmpl := reg.loadTemplates("templates/show.html")
-	pd := PageData{
-		SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), 
-		CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData, 
-		Flash: reg.getFlash(w, r), RenderedSidebars: renderedSidebars,
-	}
+	pd := PageData{SiteTitle: reg.Config.SiteTitle, Resources: reg.Resources, GroupedResources: reg.getGroupedResources(), GroupedPages: reg.getGroupedPages(), CurrentResource: res, Fields: fields, Item: itemMap, User: user, CSS: template.CSS(styleContent), Associations: assocData, Flash: reg.getFlash(w, r), RenderedSidebars: renderedSidebars}
 	tmpl.ExecuteTemplate(w, "show.html", pd)
 }
 
-func (reg *Registry) renderForm(res *resource.Resource, item interface{}, w http.ResponseWriter, r *http.Request, user *models.AdminUser) {
+func (reg *Registry) renderForm(res *Resource, item interface{}, w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fields := res.GetFieldsFor("edit")
 	var itemMap map[string]interface{}
@@ -123,7 +112,7 @@ func (reg *Registry) renderForm(res *resource.Resource, item interface{}, w http
 	tmpl.ExecuteTemplate(w, "form.html", pd)
 }
 
-func (reg *Registry) handleSave(res *resource.Resource, w http.ResponseWriter, r *http.Request, user *models.AdminUser) {
+func (reg *Registry) handleSave(res *Resource, w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	r.ParseMultipartForm(32 << 20)
 	model := reflect.New(reflect.TypeOf(res.Model)).Interface()
 	isUpdate, id := false, r.FormValue("ID")
@@ -153,14 +142,14 @@ func (reg *Registry) handleSave(res *resource.Resource, w http.ResponseWriter, r
 	http.Redirect(w, r, "/admin/"+res.Name, 303)
 }
 
-func (reg *Registry) handleBatchAction(res *resource.Resource, w http.ResponseWriter, r *http.Request) {
+func (reg *Registry) handleBatchAction(res *Resource, w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" { http.Error(w, "Method not allowed", 405); return }
 	r.ParseForm(); actionName, ids := r.FormValue("action_name"), r.Form["ids"]
 	if actionName == "" || len(ids) == 0 { http.Redirect(w, r, "/admin/"+res.Name, 303); return }
 	for _, a := range res.BatchActions { if a.Name == actionName { a.Handler(res, ids, w, r); return } }
 }
 
-func (reg *Registry) handleExport(res *resource.Resource, w http.ResponseWriter, r *http.Request) {
+func (reg *Registry) handleExport(res *Resource, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s_export.csv", res.Name))
 	writer := csv.NewWriter(w); defer writer.Flush()
@@ -176,9 +165,9 @@ func (reg *Registry) handleExport(res *resource.Resource, w http.ResponseWriter,
 	}
 }
 
-func (reg *Registry) handleCustomAction(res *resource.Resource, w http.ResponseWriter, r *http.Request, isCollection bool) {
+func (reg *Registry) handleCustomAction(res *Resource, w http.ResponseWriter, r *http.Request, isCollection bool) {
 	actionName := r.URL.Query().Get("name")
-	var actions []resource.Action
+	var actions []Action
 	if isCollection { actions = res.CollectionActions } else { actions = res.MemberActions }
 	for _, a := range actions { if a.Name == actionName { a.Handler(res, w, r); return } }
 }

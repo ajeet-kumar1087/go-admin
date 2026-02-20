@@ -2,12 +2,11 @@ package admin
 
 import (
 	"fmt"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
 	"html/template"
 	"net/http"
 )
 
-func (reg *Registry) renderDashboard(w http.ResponseWriter, r *http.Request, user *models.AdminUser) {
+func (reg *Registry) renderDashboard(w http.ResponseWriter, r *http.Request, user *AdminUser) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	var stats []Stat
 	for name, res := range reg.Resources {

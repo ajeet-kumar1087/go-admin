@@ -1,4 +1,4 @@
-package config
+package admin
 
 import (
 	"gopkg.in/yaml.v3"
@@ -12,7 +12,7 @@ type Config struct {
 	ThemeColor      string `yaml:"theme_color"`
 	SessionTTL      int    `yaml:"session_ttl_hours"`
 	SearchThreshold int64  `yaml:"search_threshold"`
-	UploadDir       string `yaml:"upload_dir"` // Directory to store uploads
+	UploadDir       string `yaml:"upload_dir"`
 }
 
 // DefaultConfig returns a sane default configuration.

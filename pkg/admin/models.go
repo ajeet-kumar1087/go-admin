@@ -1,4 +1,4 @@
-package models
+package admin
 
 import (
 	"golang.org/x/crypto/bcrypt"

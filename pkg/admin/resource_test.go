@@ -2,11 +2,10 @@ package admin
 
 import (
 	"testing"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/resource"
 )
 
 func TestResourceFieldConfig(t *testing.T) {
-	res := resource.NewResource(TestModel{})
+	res := NewResource(TestModel{})
 	res.RegisterField("ID", "Identifier", true)
 	res.RegisterField("Name", "Full Name", false)
 
@@ -28,7 +27,7 @@ func TestResourceFieldConfig(t *testing.T) {
 }
 
 func TestResourceAssociations(t *testing.T) {
-	res := resource.NewResource(TestModel{})
+	res := NewResource(TestModel{})
 	res.HasMany("Items", "Items List", "OtherModel", "ModelID")
 	res.BelongsTo("ParentID", "Parent", "ParentModel", "ID")
 
@@ -42,7 +41,7 @@ func TestResourceAssociations(t *testing.T) {
 }
 
 func TestResourceActions(t *testing.T) {
-	res := resource.NewResource(TestModel{})
+	res := NewResource(TestModel{})
 	res.AddMemberAction("test", "Test Action", nil)
 	res.AddCollectionAction("coll", "Coll Action", nil)
 	res.AddBatchAction("batch", "Batch Action", nil)

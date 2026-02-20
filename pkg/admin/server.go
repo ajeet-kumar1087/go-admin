@@ -3,8 +3,6 @@ package admin
 import (
 	"embed"
 	"fmt"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/resource"
 	"html/template"
 	"net/http"
 	"path/filepath"
@@ -16,15 +14,15 @@ var templateFS embed.FS
 
 type PageData struct {
 	SiteTitle        string
-	Resources        map[string]*resource.Resource
-	GroupedResources map[string][]*resource.Resource
+	Resources        map[string]*Resource
+	GroupedResources map[string][]*Resource
 	GroupedPages     map[string][]*Page
-	CurrentResource  *resource.Resource
-	Fields           []resource.Field
+	CurrentResource  *Resource
+	Fields           []Field
 	Data             []map[string]interface{}
 	Item             map[string]interface{}
 	Filters          map[string]string
-	User             *models.AdminUser
+	User             *AdminUser
 	Stats            []Stat
 	Error            string
 	Flash            string
@@ -34,7 +32,7 @@ type PageData struct {
 	TotalCount       int64
 	HasPrev, HasNext bool
 	PrevPage, NextPage int
-	Scopes           []resource.Scope
+	Scopes           []Scope
 	CurrentScope     string
 	Associations     map[string]AssociationData
 	ChartData        []ChartWidget
@@ -50,8 +48,8 @@ type ChartWidget struct {
 }
 
 type AssociationData struct {
-	Resource *resource.Resource
-	Fields   []resource.Field
+	Resource *Resource
+	Fields   []Field
 	Items    []map[string]interface{}
 	Options  []map[string]interface{}
 }

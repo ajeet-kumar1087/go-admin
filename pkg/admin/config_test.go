@@ -3,11 +3,10 @@ package admin
 import (
 	"os"
 	"testing"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/config"
 )
 
 func TestDefaultConfig(t *testing.T) {
-	conf := config.DefaultConfig()
+	conf := DefaultConfig()
 	if conf.SiteTitle != "Go Admin" {
 		t.Errorf("Expected default title 'Go Admin'")
 	}
@@ -27,7 +26,7 @@ default_per_page: 25
 	}
 	defer os.Remove("test_config.yml")
 
-	conf, err := config.LoadConfig("test_config.yml")
+	conf, err := LoadConfig("test_config.yml")
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}

@@ -3,9 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/ajeet-kumar1087/go-admin/pkg/admin"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/config"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/resource"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"html/template"
@@ -42,26 +39,26 @@ func main() {
 	db, err := gorm.Open(sqlite.Open("admin.db"), &gorm.Config{})
 	if err != nil { log.Fatal("failed to connect database") }
 
-	db.AutoMigrate(&User{}, &Product{}, &ProductInfo{}, &models.Permission{}, &Role{}, &models.AdminUser{}, &models.Session{}, &models.AuditLog{})
+	db.AutoMigrate(&User{}, &Product{}, &ProductInfo{}, &admin.Permission{}, &Role{}, &admin.AdminUser{}, &admin.Session{}, &admin.AuditLog{})
 
 	adm := admin.NewRegistry(db)
-	conf, _ := config.LoadConfig("admin.yml")
+	conf, _ := admin.LoadConfig("admin.yml")
 	if conf != nil { adm.SetConfig(conf) }
 
 	roles := []string{"admin", "editor", "viewer"}
 
-	addActivityAction := func(r *resource.Resource) {
-		r.AddMemberAction("activity", "View History", func(res *resource.Resource, w http.ResponseWriter, r *http.Request) {
+	addActivityAction := func(r *admin.Resource) {
+		r.AddMemberAction("activity", "View History", func(res *admin.Resource, w http.ResponseWriter, r *http.Request) {
 			id := r.URL.Query().Get("id")
 			http.Redirect(w, r, fmt.Sprintf("/admin/AuditLog?q_ResourceName=%s&q_RecordID=%s", res.Name, id), 303)
 		})
 	}
 
 	// Administration Group
-	adm.Register(models.AdminUser{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("Email", "Email", false).RegisterField("Role", "Role", false).SetFieldType("Role", "select", roles...)
-	adm.Register(models.AuditLog{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("CreatedAt", "Time", true).RegisterField("UserEmail", "User", true).RegisterField("ResourceName", "Resource", true).RegisterField("RecordID", "Record ID", true).RegisterField("Action", "Action", true).RegisterField("Changes", "Changes", true)
+	adm.Register(admin.AdminUser{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("Email", "Email", false).RegisterField("Role", "Role", false).SetFieldType("Role", "select", roles...)
+	adm.Register(admin.AuditLog{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("CreatedAt", "Time", true).RegisterField("UserEmail", "User", true).RegisterField("ResourceName", "Resource", true).RegisterField("RecordID", "Record ID", true).RegisterField("Action", "Action", true).RegisterField("Changes", "Changes", true)
 	adm.Register(Role{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("Name", "Role Name", false)
-	adm.Register(models.Permission{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("Role", "Role Name", false).RegisterField("ResourceName", "Resource", false).RegisterField("Action", "Action", false).SetFieldType("Role", "select", roles...).SetFieldType("ResourceName", "select", adm.ResourceNames()...).SetFieldType("Action", "select", "list", "show", "new", "edit", "save", "delete")
+	adm.Register(admin.Permission{}).SetGroup("Administration").RegisterField("ID", "ID", true).RegisterField("Role", "Role Name", false).RegisterField("ResourceName", "Resource", false).RegisterField("Action", "Action", false).SetFieldType("Role", "select", roles...).SetFieldType("ResourceName", "select", adm.ResourceNames()...).SetFieldType("Action", "select", "list", "show", "new", "edit", "save", "delete")
 
 	// Users
 	uRes := adm.Register(User{}).
@@ -74,7 +71,7 @@ func main() {
 			if role == "admin" { color = "#ef4444" } else if role == "editor" { color = "#3b82f6" }
 			return template.HTML(fmt.Sprintf(`<span style="background: %s; color: white; padding: 0.2rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">%s</span>`, color, role))
 		}).
-		AddSidebar("Quick Actions", func(res *resource.Resource, item interface{}) template.HTML {
+		AddSidebar("Quick Actions", func(res *admin.Resource, item interface{}) template.HTML {
 			u := item.(*User)
 			return template.HTML(fmt.Sprintf(`<div style="display: flex; flex-direction: column; gap: 0.5rem;"><a href="mailto:%s" class="btn" style="text-align: center; background: #f1f5f9;">Email User</a></div>`, u.Email))
 		})
@@ -89,19 +86,19 @@ func main() {
 		RegisterField("Image", "Product Image", false).
 		SetFieldType("Price", "number").
 		SetFieldType("Image", "image").
-		SetSortable("Image", false). // Disable sorting for Image
+		SetSortable("Image", false).
 		SetDecorator("Price", func(val interface{}) template.HTML {
 			return template.HTML(fmt.Sprintf("<strong>$%.2f</strong>", val.(float64)))
 		}).
-		AddSidebar("Market Info", func(res *resource.Resource, item interface{}) template.HTML {
+		AddSidebar("Market Info", func(res *admin.Resource, item interface{}) template.HTML {
 			return template.HTML(`<div style="font-size: 0.8125rem; color: #475569;"><p>Competitor Avg: $145.00</p><p style="color: #10b981; margin-top: 0.25rem;">+12%% vs last month</p></div>`)
 		}).
 		HasMany("ProductInfo", "Technical Specifications", "ProductInfo", "ProductID").
-		AddCollectionAction("discount", "Apply 10% Bulk Discount", func(res *resource.Resource, w http.ResponseWriter, r *http.Request) {
+		AddCollectionAction("discount", "Apply 10% Bulk Discount", func(res *admin.Resource, w http.ResponseWriter, r *http.Request) {
 			db.Model(&Product{}).Where("price > ?", 0).Update("price", gorm.Expr("price * 0.9"))
 			http.Redirect(w, r, "/admin/Product", 303)
 		}).
-		AddBatchAction("batch_delete", "Delete Selected", func(res *resource.Resource, ids []string, w http.ResponseWriter, r *http.Request) {
+		AddBatchAction("batch_delete", "Delete Selected", func(res *admin.Resource, ids []string, w http.ResponseWriter, r *http.Request) {
 			db.Where("id IN ?", ids).Delete(&Product{})
 			http.Redirect(w, r, "/admin/Product", 303)
 		})
@@ -122,12 +119,12 @@ func main() {
 	})
 
 	// Seed Data
-	var adminCount int64; db.Model(&models.AdminUser{}).Count(&adminCount)
+	var adminCount int64; db.Model(&admin.AdminUser{}).Count(&adminCount)
 	if adminCount == 0 {
-		adminUser := &models.AdminUser{Email: "admin@example.com", Role: "admin"}
+		adminUser := &admin.AdminUser{Email: "admin@example.com", Role: "admin"}
 		adminUser.SetPassword("password123"); db.Create(adminUser)
 		db.Create(&Role{Name: "admin"}); db.Create(&Role{Name: "editor"}); db.Create(&Role{Name: "viewer"})
-		db.Create(&models.Permission{Role: "editor", ResourceName: "Product", Action: "list"})
+		db.Create(&admin.Permission{Role: "editor", ResourceName: "Product", Action: "list"})
 		p1 := &Product{Name: "Mechanical Keyboard", Price: 150.00}; db.Create(p1)
 		db.Create(&ProductInfo{ProductID: p1.ID, Description: "Blue Switches", Manufacturer: "Razer"})
 		db.Create(&User{Email: "user@example.com", Role: "editor"})

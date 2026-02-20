@@ -2,13 +2,12 @@ package admin
 
 import (
 	"testing"
-	"github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func TestPasswordHashing(t *testing.T) {
-	user := &models.AdminUser{}
+	user := &AdminUser{}
 	password := "secure123"
 	
 	err := user.SetPassword(password)
@@ -31,7 +30,7 @@ func TestPasswordHashing(t *testing.T) {
 
 func TestIsAllowed(t *testing.T) {
 	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	db.AutoMigrate(&models.Permission{})
+	db.AutoMigrate(&Permission{})
 	reg := NewRegistry(db)
 
 	// Admin role bypass
@@ -45,7 +44,7 @@ func TestIsAllowed(t *testing.T) {
 	}
 
 	// Seed specific permission
-	db.Create(&models.Permission{Role: "editor", ResourceName: "Product", Action: "edit"})
+	db.Create(&Permission{Role: "editor", ResourceName: "Product", Action: "edit"})
 
 	if !reg.IsAllowed("editor", "Product", "edit") {
 		t.Errorf("Editor should have edit permission for Product")

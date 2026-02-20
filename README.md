@@ -30,8 +30,6 @@ package main
 
 import (
     "github.com/ajeet-kumar1087/go-admin/pkg/admin"
-    "github.com/ajeet-kumar1087/go-admin/pkg/admin/resource"
-    "github.com/ajeet-kumar1087/go-admin/pkg/admin/models"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
     "net/http"
@@ -45,7 +43,7 @@ type Product struct {
 
 func main() {
     db, _ := gorm.Open(sqlite.Open("admin.db"), &gorm.Config{})
-    db.AutoMigrate(&Product{}, &models.AdminUser{}, &models.Permission{}, &models.Session{}, &models.AuditLog{})
+    db.AutoMigrate(&Product{}, &admin.AdminUser{}, &admin.Permission{}, &admin.Session{}, &admin.AuditLog{})
 
     // Initialize Admin
     adm := admin.NewRegistry(db)
